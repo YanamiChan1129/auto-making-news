@@ -2,7 +2,7 @@
 $ErrorActionPreference = "Continue"
 
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-Set-Location $root
+$tools = Split-Path -Parent $PSScriptRoot
 
 $ts = Get-Date -Format "yyyy-MM-dd"
 $log = Join-Path $env:TEMP "news_writer_$ts.log"
@@ -27,6 +27,9 @@ Write-Log "starting news-writer task (timeout ${TIMEOUT_MIN}min)"
 # opencode 可执行文件路径：优先环境变量 OPENCODE_CMD，否则依赖 PATH
 $opencode = if ($env:OPENCODE_CMD) { $env:OPENCODE_CMD } else { "opencode.cmd" }
 $procArgs = @("run", "--agent", "news-writer", "--auto", "Start today's news writing task")
+
+# 必须在 tools 目录下运行，opencode 才能找到 tools\.opencode\agent\news-writer.md
+Set-Location $tools
 
 $p = Start-Process -FilePath $opencode -ArgumentList $procArgs -NoNewWindow `
     -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
@@ -60,7 +63,7 @@ if (Test-Path $stderr) {
 }
 Remove-Item $stdout, $stderr -ErrorAction SilentlyContinue
 
-$tmpImages = Join-Path $root "scripts\tmp_images"
+$tmpImages = Join-Path $tools "scripts\tmp_images"
 if (Test-Path $tmpImages) {
     Remove-Item (Join-Path $tmpImages "*") -Recurse -Force -ErrorAction SilentlyContinue
     Write-Log "cleaned tmp_images intermediate files"
