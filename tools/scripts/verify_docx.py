@@ -3,6 +3,8 @@ from docx import Document
 
 EXPECTED_IMAGE_COUNT = 3
 EXPECTED_BODY_PARAS = 6
+MIN_BODY_CHARS = 1300
+MAX_BODY_CHARS = 1700
 BAD_MARKERS = ("captions_placeholder", "placeholder", "Lorem ipsum", "TBD", "待补充")
 
 
@@ -27,17 +29,21 @@ def verify(path):
         problems.append(f"missing subtitle bar (para 1): {subtitle!r}")
 
     body = paras[2:15]
-    body = [t for t in body if t and "图｜" not in t and t not in ("蓝星棋局",)]
+    body = [t for t in body if t and "图｜" not in t and t not in ("火星前哨站",)]
     if len(body) != EXPECTED_BODY_PARAS:
         problems.append(f"body paragraphs {len(body)} != {EXPECTED_BODY_PARAS}")
+
+    body_chars = sum(len(t) for t in body)
+    if body_chars < MIN_BODY_CHARS or body_chars > MAX_BODY_CHARS:
+        problems.append(f"body total chars {body_chars} outside range {MIN_BODY_CHARS}-{MAX_BODY_CHARS}")
 
     captions = [t for t in paras if t.startswith("图｜")]
     if len(captions) != 3:
         problems.append(f"captions {len(captions)} != 3")
 
-    has_signature = any(t == "蓝星棋局" for t in paras)
+    has_signature = any(t == "火星前哨站" for t in paras)
     if not has_signature:
-        problems.append("missing signature '蓝星棋局'")
+        problems.append("missing signature '火星前哨站'")
 
     for marker in BAD_MARKERS:
         if any(marker in t for t in paras):

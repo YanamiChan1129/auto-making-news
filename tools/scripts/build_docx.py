@@ -37,7 +37,7 @@ def ensure_docx_supported(path):
         return path
 
 
-def build(title, output, paragraphs, images, subtitle=None, captions=None, signature="蓝星棋局"):
+def build(title, output, paragraphs, images, subtitle=None, captions=None, signature="火星前哨站"):
     doc = Document()
 
     head = doc.add_heading(level=1)
@@ -93,7 +93,7 @@ def main() -> int:
     p.add_argument("--output", required=True)
     p.add_argument("--body", required=True, help="JSON file: {\"subtitle\": ..., \"paragraphs\": [...], \"captions\": [...]}")
     p.add_argument("--images", nargs="*", default=[], help="local image paths (1-3)")
-    p.add_argument("--signature", default="蓝星棋局")
+    p.add_argument("--signature", default="火星前哨站")
     args = p.parse_args()
 
     with open(args.body, "r", encoding="utf-8-sig") as f:
