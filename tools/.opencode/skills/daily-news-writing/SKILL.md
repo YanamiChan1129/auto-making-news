@@ -57,10 +57,14 @@ description: 每日国际新闻写作流水线。搜索昨日/今日国际新闻
    ```
    若输出含 FAIL（段落数不为 15、缺副标题栏、缺图注、缺署名、含占位符、图片数≠3、正文总字数不在 1300-1700），回到第 1 步修正后重新生成，直到 PASS 才进入下一篇。
 
-### 第五步：更新查重档案
+### 第五步：更新查重档案与素材存档
 1. 读取 `state\written_topics.json`（相对 tools），把今天这 5 条的「主题关键词」追加进去（每条含：日期、标题、主题关键词；keywords 统一为 `国家：核心事件` 格式，禁止直接用标题代替）。
 2. 运行 `python scripts\refresh_window.py` 刷新 `state\recent_topics.json`（仅保留 15 天内的条目）。
 3. 校验 recent_topics.json 已更新。
+4. 把今天选中的 5 条素材存档（标题、摘要、来源）：
+   - 先整理 5 条存档 JSON（如 `scripts\tmp_images\daily_items.json`），每条含：`title`、`keywords`、`summary`（100-150 字摘要）、`source`（信息来源，如"据路透社"）。
+   - 运行 `python scripts\save_daily_news.py --date <今天 YYYY-MM-DD> --items scripts\tmp_images\daily_items.json`，产出 `state\daily_news\<日期>.json` 和 `state\daily_news\<日期>.md`。
+   - 校验两个文件已生成且含 5 条。
 
 ### 第六步：交付报告
 向用户报告：今天写了哪 5 篇、各篇标题、存放的日期文件夹路径。不输出文章全文，只给清单。
@@ -71,3 +75,4 @@ description: 每日国际新闻写作流水线。搜索昨日/今日国际新闻
 - 图片必须是真实新闻图片，禁止 AI 生成图，禁止外链（必须下载到本地再插入）。
 - docx 文件名=标题，存入当天日期文件夹，目录不存在就创建。
 - 正文 6 段合计必须在 1300-1700 字之间，否则自检 FAIL，必须调整重跑。
+- 每天必须完成素材存档（state\daily_news\ 下的 JSON 和 Markdown），缺一不可。

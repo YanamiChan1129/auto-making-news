@@ -25,12 +25,13 @@ permission:
 
 ## 执行方式
 
-加载 `daily-news-writing` skill，按其全部步骤严格执行：读取查重档案 → 搜新闻候选 → 查重凑满5条 → 逐篇写作配图生成docx并自检 → 更新查重档案 → 交付报告。
+加载 `daily-news-writing` skill，按其全部步骤严格执行：读取查重档案 → 搜新闻候选 → 查重凑满5条 → 逐篇写作配图生成docx并自检 → 更新查重档案与素材存档 → 交付报告。
 
 skill 中引用的提示词、脚本、档案文件均相对 `tools\` 目录执行，路径如下：
 - 提示词：`prompts\find_news.md`、`prompts\write_article.md`
 - 查重档案：`state\written_topics.json`、`state\recent_topics.json`
-- 脚本：`scripts\fetch_image.py`、`scripts\build_docx.py`、`scripts\verify_docx.py`、`scripts\refresh_window.py`
+- 素材存档：`state\daily_news\`（每天产出 `<日期>.json` 和 `<日期>.md`）
+- 脚本：`scripts\fetch_image.py`、`scripts\build_docx.py`、`scripts\verify_docx.py`、`scripts\refresh_window.py`、`scripts\save_daily_news.py`
 - 临时图片：`scripts\tmp_images\`
 
 ## 铁律
@@ -38,5 +39,6 @@ skill 中引用的提示词、脚本、档案文件均相对 `tools\` 目录执�
 - 查重只比对 recent_topics.json（15天窗口），不比对全量档案。
 - 图片必须是真实新闻图片，禁止AI生成图，禁止外链（必须下载到本地再插入）。
 - docx 文件名=标题，存入当天日期文件夹，目录不存在就创建。
+- 每天必须完成素材存档（state\daily_news\ 下的 JSON 和 Markdown），缺一不可。
 - 正文 6 段合计必须在 1300-1700 字之间，否则自检 FAIL，必须调整重跑。
 - 全程以简体中文输出。
