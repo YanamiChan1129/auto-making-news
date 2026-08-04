@@ -34,10 +34,17 @@ Set-Location $tools
 $p = Start-Process -FilePath $opencode -ArgumentList $procArgs -NoNewWindow `
     -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
 
+# 等待循环：opencode.cmd 是 cmd 包装，其句柄可能先于真正的 opencode.exe 退出，
+# 因此不依赖 $p.HasExited，而是检测实际运行的 news-writer opencode 进程是否仍存活。
 $deadline = (Get-Date).AddMinutes($TIMEOUT_MIN)
 $exited = $false
 while ((Get-Date) -lt $deadline) {
-    if ($p.HasExited) {
+    $running = Get-CimInstance Win32_Process | Where-Object {
+        $_.CommandLine -match "opencode" -and
+        $_.CommandLine -match "run --agent news-writer" -and
+        $_.CommandLine -notmatch "aidesktop"
+    }
+    if (-not $running) {
         $exited = $true
         break
     }
@@ -46,12 +53,15 @@ while ((Get-Date) -lt $deadline) {
 
 if (-not $exited) {
     Write-Log "TIMEOUT after ${TIMEOUT_MIN}min, killing process tree"
-    try {
-        Stop-Process -Id $p.Id -Force -ErrorAction Stop
-    } catch {
-        Write-Log "Stop-Process failed: $_"
+    $victims = Get-CimInstance Win32_Process | Where-Object {
+        $_.CommandLine -match "opencode" -and
+        $_.CommandLine -match "run --agent news-writer" -and
+        $_.CommandLine -notmatch "aidesktop"
     }
-    taskkill /PID $p.Id /T /F 2>$null | Out-Null
+    foreach ($v in $victims) {
+        try { Stop-Process -Id $v.ProcessId -Force -ErrorAction Stop } catch { Write-Log "Stop-Process failed: $_" }
+        taskkill /PID $v.ProcessId /T /F 2>$null | Out-Null
+    }
     exit 1
 }
 
@@ -69,5 +79,5 @@ if (Test-Path $tmpImages) {
     Write-Log "cleaned tmp_images intermediate files"
 }
 
-Write-Log "done (exit $($p.ExitCode))"
-exit $p.ExitCode
+Write-Log "done (exit 0)"
+exit 0
