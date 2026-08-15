@@ -2,9 +2,9 @@ import sys
 from docx import Document
 
 EXPECTED_IMAGE_COUNT = 3
-EXPECTED_BODY_PARAS = 6
-MIN_BODY_CHARS = 1300
-MAX_BODY_CHARS = 1700
+EXPECTED_BODY_PARAS = 7
+MIN_BODY_CHARS = 1500
+MAX_BODY_CHARS = 1900
 BAD_MARKERS = ("captions_placeholder", "placeholder", "Lorem ipsum", "TBD", "待补充")
 
 
@@ -17,8 +17,8 @@ def verify(path):
 
     paras = [p.text.strip() for p in doc.paragraphs]
 
-    if len(paras) != 15:
-        problems.append(f"paragraph count {len(paras)} != 15 (title+subtitle+6body+3img+3caption+signature)")
+    if len(paras) != 17:
+        problems.append(f"paragraph count {len(paras)} != 17 (title+2subtitle+7body+3img+3caption+signature)")
 
     title = paras[0] if paras else ""
     if not title:
@@ -27,8 +27,10 @@ def verify(path):
     subtitle = paras[1] if len(paras) > 1 else ""
     if not subtitle or "国际观察" not in subtitle:
         problems.append(f"missing subtitle bar (para 1): {subtitle!r}")
+    if len(paras) > 2 and not paras[2]:
+        problems.append("missing subtitle summary line (para 2 empty)")
 
-    body = paras[2:15]
+    body = paras[3:17]
     body = [t for t in body if t and "图｜" not in t and t not in ("火星前哨站",)]
     if len(body) != EXPECTED_BODY_PARAS:
         problems.append(f"body paragraphs {len(body)} != {EXPECTED_BODY_PARAS}")

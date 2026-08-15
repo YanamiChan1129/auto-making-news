@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>每日新闻写作 · 进度仪表盘</title>
+<style>
+  :root {
+    --bg: #f6f1e8;            /* 奶白底色 */
+    --panel: #fffdf8;         /* 卡片 */
+    --panel2: #faf6ee;
+    --border: #e6ddca;
+    --text: #4b4438;
+    --dim: #8d8371;
+    --accent: #b98a3e;        /* 暖金 */
+    --green: #6f9d5e;
+    --amber: #d19a3e;
+    --blue: #7a9eb3;
+    --red: #c25e4e;
+    --shadow: 0 2px 10px rgba(120, 100, 60, .08);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: "Microsoft YaHei", "PingFang SC", sans-serif; padding: 28px 32px; }
+  header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 22px; }
+  h1 { font-size: 20px; font-weight: 600; color: var(--text); letter-spacing: .5px; }
+  h1 .dot { color: var(--accent); }
+  .sub { color: var(--dim); font-size: 13px; }
+  .datebar { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  .datebtn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 16px; cursor: pointer; }
+  .datebtn:hover { background: var(--panel2); border-color: var(--accent); }
+  .datebtn:disabled { opacity: .35; cursor: default; }
+  #dateText { font-size: 15px; font-weight: 600; min-width: 116px; text-align: center; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+  .quick { font-size: 13px; color: var(--dim); background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
+  .quick:hover { color: var(--accent); border-color: var(--accent); }
+  select, button { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer; }
+  .badge { display: inline-block; padding: 3px 14px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+  .b-running { background: #e8f0f5; color: #5b83a0; }
+  .b-done { background: #eaf3e6; color: var(--green); }
+  .b-fail, .b-timeout { background: #f7e8e4; color: var(--red); }
+  .b-skip { background: #efeadf; color: var(--dim); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-bottom: 20px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; box-shadow: var(--shadow); }
+  .card .label { color: var(--dim); font-size: 12px; margin-bottom: 8px; }
+  .card .value { font-size: 22px; font-weight: 700; }
+  .bar-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; margin-bottom: 20px; box-shadow: var(--shadow); }
+  .bar-row { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 10px; }
+  .bar { height: 14px; background: var(--panel2); border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
+  .bar > div { height: 100%; background: linear-gradient(90deg, #d9b380, var(--accent)); width: 0%; transition: width .6s; }
+  .trend { display: flex; align-items: flex-end; gap: 14px; height: 130px; padding-top: 10px; }
+  .tcol { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+  .tbar { width: 70%; max-width: 46px; border-radius: 6px 6px 0 0; background: linear-gradient(180deg, #d9b380, var(--accent)); transition: height .6s; position: relative; }
+  .tbar.green { background: linear-gradient(180deg, #a8c99b, var(--green)); }
+  .tbar.red { background: linear-gradient(180deg, #d99a8e, var(--red)); }
+  .tbar.blue { background: linear-gradient(180deg, #a9c3d6, var(--blue)); }
+  .tval { font-size: 11px; color: var(--dim); margin-bottom: 4px; }
+  .tlabel { font-size: 11px; color: var(--dim); margin-top: 6px; }
+  .alink { color: var(--accent); text-decoration: none; }
+  .alink:hover { text-decoration: underline; }
+  .articles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 20px; }
+  .article { background: var(--panel); border: 1px solid var(--border); border-left: 4px solid #d9d0bc; border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow); }
+  .article.done { border-left-color: var(--green); }
+  .article.work { border-left-color: var(--amber); }
+  .article .no { color: var(--dim); font-size: 12px; }
+  .article .title { font-size: 13px; margin: 8px 0 10px; line-height: 1.55; min-height: 42px; }
+  .article .st { font-size: 12px; color: var(--text); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+  .dot.gray { background: #cfc6b2; } .dot.amber { background: var(--amber); animation: pulse 1.2s infinite; }
+  .dot.green { background: var(--green); } .dot.blue { background: var(--blue); animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .log { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 14px 18px; box-shadow: var(--shadow); }
+  .log .head { display: flex; justify-content: space-between; color: var(--dim); font-size: 12px; margin-bottom: 10px; }
+  .log pre { font-family: Consolas, "Courier New", monospace; font-size: 12px; line-height: 1.65; color: #6b6252; background: var(--panel2); border: 1px solid var(--border); border-radius: 10px; padding: 12px; max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
+  .warn { background: #faf0dc; border: 1px solid #e3c98f; color: #a5761a; border-radius: 12px; padding: 10px 16px; margin-bottom: 16px; font-size: 13px; display: none; }
+  .empty { background: var(--panel); border: 1px dashed var(--border); border-radius: 14px; padding: 40px; text-align: center; color: var(--dim); margin-bottom: 20px; }
+  .footer { color: var(--dim); font-size: 12px; margin-top: 18px; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>每日新闻写作<span class="dot"> · </span>进度仪表盘</h1>
+  <span class="sub" id="clock"></span>
+  <span id="statusBadge"></span>
+  <div class="datebar">
+    <button class="datebtn" id="prevBtn" onclick="stepDate(-1)">‹</button>
+    <span id="dateText" title="点击选择日期" onclick="togglePicker()"></span>
+    <button class="datebtn" id="nextBtn" onclick="stepDate(1)">›</button>
+    <button class="quick" id="todayBtn" onclick="goToday()">今天</button>
+    <select id="dateSel" onchange="pickDate(this.value)" style="display:none"></select>
+    <button class="quick" onclick="location.reload()">刷新</button>
+  </div>
+</header>
+
+<div class="warn" id="staleWarn">⚠ 进度已超过 3 分钟未更新，任务进程可能被中断（如 Ctrl+C / 关机）。</div>
+
+<div class="cards">
+  <div class="card"><div class="label">阶段</div><div class="value" id="phase" style="font-size:16px">-</div></div>
+  <div class="card"><div class="label">已耗时</div><div class="value" id="elapsed">-</div></div>
+  <div class="card"><div class="label">预计剩余</div><div class="value" id="eta">-</div></div>
+  <div class="card"><div class="label">已生成 docx</div><div class="value" id="docxCount">-</div></div>
+  <div class="card"><div class="label">已下载配图</div><div class="value" id="imgCount">-</div></div>
+  <div class="card"><div class="label">agent 存活</div><div class="value" id="alive" style="font-size:16px">-</div></div>
+</div>
+
+<div class="bar-wrap">
+  <div class="bar-row"><span>10 篇进度</span><span id="barText">0 / 10</span></div>
+  <div class="bar"><div id="barFill"></div></div>
+</div>
+
+<div class="bar-wrap" id="trendWrap">
+  <div class="bar-row"><span>近 7 天耗时（分钟）</span><span id="trendHint" style="color:var(--dim);font-weight:400">加载中…</span></div>
+  <div class="trend" id="trend"></div>
+</div>
+
+<div class="articles" id="articles"></div>
+
+<div class="log">
+  <div class="head"><span>实时日志（自动滚动）</span><span id="logTs">-</span></div>
+  <pre id="logBox"></pre>
+</div>
+
+<div class="footer">数据源：tools\state\progress\&lt;日期&gt;.json · 每 5 秒自动刷新 · <span id="lanTip"></span></div>
+
+<script>
+const statusMap = {
+  running: { text: "运行中", cls: "b-running" },
+  done:    { text: "已完成", cls: "b-done" },
+  failed:  { text: "失败",   cls: "b-fail" },
+  timeout: { text: "超时",   cls: "b-timeout" },
+  skip:    { text: "当日已完成，跳过", cls: "b-skip" },
+  interrupted: { text: "已中断", cls: "b-fail" }
+};
+const phaseMap = {
+  start: "启动中", search: "选题搜索", image: "配图下载", write: "写作中",
+  build: "生成 docx", verify: "质检", archive: "更新存档", done: "已完成",
+  failed: "失败", timeout: "超时", interrupted: "已中断", rerun: "重跑中", skip: "已跳过"
+};
+const artStatusMap = { "待写": "gray", "写作中": "amber", "配图中": "blue", "已完成": "green" };
+
+let currentDate = todayStr();
+let dates = [];
+let lastLog = "";
+let autoScroll = true;
+let articleCache = {};
+
+function todayStr() {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+function shiftDate(s, n) {
+  const d = new Date(s + "T12:00:00");
+  d.setDate(d.getDate() + n);
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+
+async function fetchJSON(url) {
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error("http " + r.status);
+  return r.json();
+}
+
+async function loadDates() {
+  try {
+    dates = await fetchJSON("/api/dates");
+    const params = new URLSearchParams(location.search);
+    if (params.get("date")) currentDate = params.get("date");
+    goDate(currentDate);
+  } catch (e) {
+    document.getElementById("statusBadge").textContent = "服务未连接";
+  }
+}
+
+function goToday() { goDate(todayStr()); }
+
+function goDate(d) {
+  currentDate = d;
+  history.replaceState(null, "", "?date=" + currentDate);
+  document.getElementById("dateText").textContent = currentDate;
+  document.getElementById("nextBtn").disabled = currentDate >= todayStr();
+  refresh();
+}
+
+function stepDate(n) {
+  const d = shiftDate(currentDate, n);
+  if (d > todayStr()) return;
+  goDate(d);
+}
+
+function togglePicker() {
+  const sel = document.getElementById("dateSel");
+  sel.style.display = sel.style.display === "none" ? "inline-block" : "none";
+  if (sel.style.display === "inline-block" && sel.options.length === 0) {
+    const all = new Set([...dates, todayStr()].sort());
+    for (let i = 0; i < 14; i++) all.add(shiftDate(todayStr(), -i));
+    for (const d of [...all].sort()) {
+      const o = document.createElement("option");
+      o.value = d; o.textContent = d;
+      sel.appendChild(o);
+    }
+    sel.value = currentDate;
+  }
+}
+
+function pickDate(v) { goDate(v); document.getElementById("dateSel").style.display = "none"; }
+
+async function getArticles(date) {
+  if (articleCache[date]) return articleCache[date];
+  try { articleCache[date] = await fetchJSON("/api/articles?date=" + date); }
+  catch (e) { articleCache[date] = []; }
+  return articleCache[date];
+}
+
+function articleHref(date, title) {
+  const files = articleCache[date] || [];
+  const hit = files.find(f => title && f.replace(/\.docx$/, "") === title);
+  if (hit) return "/article/" + date + "/" + encodeURIComponent(hit);
+  return "";
+}
+
+async function render(p) {
+  if (!p) {
+    document.getElementById("statusBadge").textContent = "";
+    document.getElementById("articles").innerHTML =
+      '<div class="empty">该日没有运行记录</div>';
+    document.getElementById("docxCount").textContent = "-";
+    document.getElementById("barFill").style.width = "0%";
+    document.getElementById("barText").textContent = "-";
+    return;
+  }
+  const st = statusMap[p.status] || statusMap.running;
+  const badge = document.getElementById("statusBadge");
+  badge.className = "badge " + st.cls;
+  badge.textContent = st.text;
+  document.getElementById("phase").textContent = phaseMap[p.phase] || p.phase || "-";
+  document.getElementById("elapsed").textContent = p.elapsed_min != null ? p.elapsed_min + " 分钟" : "-";
+  document.getElementById("eta").textContent = p.eta_min != null ? "约 " + p.eta_min + " 分钟" : "-";
+  document.getElementById("docxCount").textContent = p.docx_done + " / 10";
+  document.getElementById("imgCount").textContent = p.images_found;
+  document.getElementById("alive").textContent = p.agent_alive ? "存活" : "已退出";
+
+  const fill = Math.min(100, p.docx_done / 10 * 100);
+  document.getElementById("barFill").style.width = fill + "%";
+  document.getElementById("barText").textContent = p.docx_done + " / 10";
+
+  const arts = document.getElementById("articles");
+  arts.innerHTML = "";
+  const files = (p.status === "done" || p.docx_done === 10) ? await getArticles(p.date) : [];
+  for (let i = 1; i <= 10; i++) {
+    const a = (p.articles || []).find(x => x.no === i) || { title: "", status: "待写" };
+    const href = (a.status === "已完成") ? articleHref(p.date, a.title) : "";
+    const div = document.createElement("div");
+    div.className = "article " + (a.status === "已完成" ? "done" : (a.status !== "待写" ? "work" : ""));
+    div.innerHTML = '<div class="no">第 ' + i + ' 篇</div>' +
+      '<div class="title">' + (href ? '<a class="alink" href="' + href + '" target="_blank">' + (a.title || "点击查看") + '</a>' : (a.title || "尚未开始")) + '</div>' +
+      '<div class="st"><span class="dot ' + (artStatusMap[a.status] || "gray") + '"></span>' + a.status + (href ? ' · <a class="alink" href="' + href + '" target="_blank">打开文章</a>' : '') + '</div>';
+    arts.appendChild(div);
+  }
+
+  const box = document.getElementById("logBox");
+  const logText = (p.log_tail || []).join("\n");
+  if (logText !== lastLog) {
+    box.textContent = logText || "（暂无日志）";
+    if (autoScroll) box.scrollTop = box.scrollHeight;
+    lastLog = logText;
+    document.getElementById("logTs").textContent = p.last_update || "";
+  }
+
+  const stale = document.getElementById("staleWarn");
+  const isFinal = ["done", "failed", "timeout", "skip"].includes(p.status);
+  const lastUpd = new Date(p.last_update).getTime();
+  stale.style.display = (!isFinal && Date.now() - lastUpd > 180000) ? "block" : "none";
+}
+
+async function renderTrend() {
+  try {
+    const all = await fetchJSON("/api/dates");
+    const recent = all.slice(0, 7).reverse();
+    const wrap = document.getElementById("trendWrap");
+    const box = document.getElementById("trend");
+    if (!recent.length) {
+      wrap.style.display = "none";
+      return;
+    }
+    wrap.style.display = "";
+    document.getElementById("trendHint").textContent = "绿=完成 蓝=运行 红=失败/超时";
+    box.innerHTML = "";
+    for (const d of recent) {
+      let p = null;
+      try { p = await fetchJSON("/api/progress?date=" + d); } catch (e) { }
+      const col = document.createElement("div");
+      col.className = "tcol";
+      if (p && p.elapsed_min != null) {
+        const h = Math.min(100, p.elapsed_min / 90 * 100);
+        const cls = p.status === "done" ? "green" : (p.status === "running" ? "blue" : "red");
+        col.innerHTML = '<div class="tbar ' + cls + '" style="height:' + h + '%"></div>' +
+          '<div class="tval">' + Math.round(p.elapsed_min) + '</div>';
+      } else {
+        col.innerHTML = '<div class="tbar" style="height:2%;background:#e0d8c6"></div><div class="tval">-</div>';
+      }
+      const lb = document.createElement("div");
+      lb.className = "tlabel";
+      lb.textContent = d.slice(5);
+      col.appendChild(lb);
+      box.appendChild(col);
+    }
+  } catch (e) { }
+}
+
+async function loadLanTip() {
+  try {
+    const ip = await fetchJSON("/api/ip");
+    if (ip) document.getElementById("lanTip").textContent = "手机访问：http://" + ip + ":8123";
+  } catch (e) { }
+}
+
+async function refresh() {
+  document.getElementById("clock").textContent = new Date().toLocaleString("zh-CN");
+  try {
+    const p = await fetchJSON("/api/progress?date=" + currentDate);
+    await render(p);
+  } catch (e) {
+    document.getElementById("statusBadge").textContent = "服务未连接";
+  }
+}
+
+document.getElementById("logBox").addEventListener("scroll", function () {
+  autoScroll = (this.scrollTop + this.clientHeight >= this.scrollHeight - 10);
+});
+
+loadDates().then(() => {
+  refresh();
+  setInterval(refresh, 5000);
+  loadLanTip();
+  renderTrend();
+  setInterval(renderTrend, 60000);
+});
+</script>
+</body>
+</html>
