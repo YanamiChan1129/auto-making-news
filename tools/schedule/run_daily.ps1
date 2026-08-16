@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-param([switch]$Rerun)
+param([switch]$Rerun, [switch]$Topup)
 $ErrorActionPreference = "Continue"
 
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
@@ -125,7 +125,9 @@ function Update-Progress([string]$status) {
         images_found = $imgs.Count
         agent_alive  = [bool]$running
         articles     = @(Get-ArticleStatuses)
-        log_tail     = @(Get-Content -LiteralPath $log -Tail 40 -ErrorAction SilentlyContinue)
+        log_tail     = @(Get-Content -LiteralPath $log -Tail 40 -ErrorAction SilentlyContinue | ForEach-Object {
+                            if ($_ -is [string]) { $_ } else { $_.value }
+                        })
         last_update  = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
     }
     $prog | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $progressFile -Encoding UTF8
@@ -142,6 +144,16 @@ $existing = @(Get-ChildItem -Path $todayDir -Filter "*.docx" -ErrorAction Silent
 if ($Rerun) {
     $existing | Remove-Item -Force -ErrorAction SilentlyContinue
     Write-Log "rerun mode: cleared $($existing.Count) existing docx, rewriting today"
+} elseif ($Topup) {
+    Write-Log "topup mode: keeping $($existing.Count) existing docx, writing the rest to reach 10"
+    if ($existing.Count -ge 10) {
+        Write-Log "skip: already has $($existing.Count) docx, nothing to top up"
+        Update-Progress "skip"
+        exit 0
+    }
+    if ($existing.Count -eq 0) {
+        Write-Log "topup mode with 0 existing docx, falling back to full run"
+    }
 } elseif ($existing.Count -ge 10) {
     Write-Log "skip: $todayDir already has $($existing.Count) docx, task already done"
     Update-Progress "skip"
@@ -155,7 +167,12 @@ Update-Progress "running"
 
 # opencode 可执行文件路径：优先环境变量 OPENCODE_CMD，否则依赖 PATH
 $opencode = if ($env:OPENCODE_CMD) { $env:OPENCODE_CMD } else { "opencode.cmd" }
-$procArgs = @("run", "--agent", "news-writer", "--auto", "Start today's news writing task")
+$prompt = if ($Topup) {
+    "Continue today's news writing task: KEEP the $($existing.Count) existing articles, write the missing articles (article no. $($existing.Count+1) to 10) to reach 10 total today, then update the archive to 10 items"
+} else {
+    "Start today's news writing task"
+}
+$procArgs = @("run", "--agent", "news-writer", "--auto", $prompt)
 
 # 必须在 tools 目录下运行，opencode 才能找到 tools\.opencode\agent\news-writer.md
 Set-Location $tools
@@ -224,9 +241,9 @@ $dailyState = Join-Path $tools "state\daily_news"
 $dailyJson = Join-Path $dailyState "$ts.json"
 $dailyMd = Join-Path $dailyState "$ts.md"
 
-# 失败时自动补跑一次（仅首次运行，-Rerun 模式不再触发，防止循环）
+# 失败时自动补跑一次（仅首次运行且非补足模式，防止覆盖已有成果）
 function Schedule-AutoRetry {
-    if ($Rerun) { return }
+    if ($Rerun -or $Topup) { return }
     $retryFlag = Join-Path $env:TEMP "news_writer_${ts}.retry"
     if (Test-Path $retryFlag) { return }
     Set-Content -LiteralPath $retryFlag -Value "1" -Encoding UTF8
