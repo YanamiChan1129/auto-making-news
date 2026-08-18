@@ -29,6 +29,7 @@ function Start-Listener([string]$prefix) {
         $l.Start()
         return $l
     } catch {
+        Log "bind failed: $prefix => $($_.Exception.Message)"
         return $null
     }
 }
@@ -58,11 +59,12 @@ function Get-DateProg($date) {
     return "null"
 }
 
-while ($true) {
-    try {
-        $ctx = $listener.GetContext()
-    } catch { break }
+function Is-ValidDate([string]$date) {
+    return $date -match "^20\d\d-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$"
+}
 
+# 每个请求在线程池线程独立处理，避免大文件下载阻塞页面轮询
+function Handle-Request($ctx) {
     $path = $ctx.Request.Url.AbsolutePath
     try {
         if ($path -eq "/") {
@@ -75,6 +77,7 @@ while ($true) {
         } elseif ($path -eq "/api/progress") {
             $date = $ctx.Request.QueryString["date"]
             if (-not $date) { $date = Get-Date -Format "yyyy-MM-dd" }
+            if (-not (Is-ValidDate $date)) { $ctx.Response.StatusCode = 400; return }
             $body = Get-DateProg $date
             $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
             Send-Bytes $ctx $bytes "application/json; charset=utf-8"
@@ -89,15 +92,19 @@ while ($true) {
             Send-Bytes $ctx $bytes "application/json; charset=utf-8"
         } elseif ($path -eq "/api/articles") {
             $date = $ctx.Request.QueryString["date"]
+            if (-not (Is-ValidDate $date)) { $ctx.Response.StatusCode = 400; return }
             $dir = Join-Path $articleRoot (Join-Path "article" $date)
             $files = @(Get-ChildItem -LiteralPath $dir -Filter "*.docx" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
             $bytes = [System.Text.Encoding]::UTF8.GetBytes(($files | ConvertTo-Json))
             Send-Bytes $ctx $bytes "application/json; charset=utf-8"
         } elseif ($path -like "/article/*") {
             $rel = [System.Uri]::UnescapeDataString($path.Substring("/article/".Length))
+            if ($rel -notmatch "^20\d\d-\d\d-\d\d/") { $ctx.Response.StatusCode = 400; return }
             $full = [System.IO.Path]::GetFullPath((Join-Path (Join-Path $articleRoot "article") $rel))
             $allowed = [System.IO.Path]::GetFullPath((Join-Path $articleRoot "article"))
-            if ($full.StartsWith($allowed) -and (Test-Path -LiteralPath $full)) {
+            # 必须严格位于 article\ 目录内（带分隔符边界，防 articleX 兄弟目录穿透）
+            $inside = $full.StartsWith($allowed + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)
+            if ($inside -and (Test-Path -LiteralPath $full)) {
                 $bytes = [System.IO.File]::ReadAllBytes($full)
                 Send-Bytes $ctx $bytes "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             } else {
@@ -111,6 +118,17 @@ while ($true) {
     } finally {
         try { $ctx.Response.Close() } catch {}
     }
+}
+
+$n = 0
+while ($true) {
+    try {
+        $ctx = $listener.GetContext()
+    } catch {
+        Log "getcontext error: $($_.Exception.Message)"
+        break
+    }
+    Handle-Request $ctx
 }
 
 Log "dashboard stopped"

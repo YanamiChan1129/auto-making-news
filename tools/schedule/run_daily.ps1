@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-param([switch]$Rerun, [switch]$Topup)
+param([switch]$Rerun, [switch]$Topup, [switch]$Attach)
 $ErrorActionPreference = "Continue"
 
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
@@ -60,23 +60,54 @@ function Merge-Tail {
 }
 
 function Detect-Phase {
-    $tail = @(Get-Content -LiteralPath $log -Tail 80 -ErrorAction SilentlyContinue)
-    $all = $tail -join "`n"
-    if ($all -match "done \(exit 0\)") { return "done" }
-    if ($all -match "TIMEOUT") { return "timeout" }
-    if ($all -match "INCOMPLETE") { return "failed" }
-    if ($all -match "rerun mode") { return "rerun" }
-    if ($all -match "skip:") { return "skip" }
-    if ($all -match "written_topics|save_daily_news|refresh_window") { return "archive" }
-    if ($all -match "verify_docx") { return "verify" }
-    if ($all -match "build_docx") { return "build" }
-    if ($all -match "fetch_image|WebFetch|Exa Web Search") { return "image" }
-    if ($all -match "websearch|Web Search|find_news") { return "search" }
-    if ($all -match "starting news-writer") { return "start" }
-    return "running"
+    # 只扫描本次运行（最后一次实例分隔行之后）最近 40 行，逐行取"最后命中的阶段"，
+    # 避免历史/计划性文本（如提到脚本名）把阶段永久锁定或抢占显示
+    $raw = @(Get-Content -LiteralPath $log -ErrorAction SilentlyContinue)
+    $marker = ""
+    for ($i = $raw.Count - 1; $i -ge 0; $i--) {
+        if ($raw[$i] -match "===== run start") {
+            $marker = $raw[$i]
+            break
+        }
+    }
+    $tail = if ($marker) {
+        @($raw | Select-Object -Skip $i | Select-Object -Last 40)
+    } else {
+        @($raw | Select-Object -Last 40)
+    }
+    $patterns = [ordered]@{
+        done    = 'done \(exit 0\)'
+        timeout = 'TIMEOUT after \d+min'
+        failed  = 'INCOMPLETE: only'
+        rerun   = 'rerun mode'
+        topup   = 'topup mode'
+        skip    = 'skip: .*already has'
+        archive = '\$ python scripts\\(save_daily_news|refresh_window)'
+        verify  = '\$ python scripts\\verify_docx'
+        build   = '\$ python scripts\\build_docx'
+        image   = 'fetch_image|WebFetch'
+        search  = 'websearch|Web Search|find_news'
+        start   = 'starting news-writer'
+    }
+    $phase = "running"
+    foreach ($line in $tail) {
+        foreach ($k in $patterns.Keys) {
+            if ($line -match $patterns[$k]) { $phase = $k }
+        }
+    }
+    return $phase
 }
 
 function Get-ArticleStatuses {
+    # 兜底标题：steps 缺失时从当天素材存档按顺序取
+    $fallback = @()
+    $dailyJson = Join-Path $tools "state\daily_news\$ts.json"
+    if (Test-Path -LiteralPath $dailyJson) {
+        try {
+            $daily = Get-Content -LiteralPath $dailyJson -Raw -Encoding UTF8 | ConvertFrom-Json
+            $fallback = @($daily.items | ForEach-Object { $_.title })
+        } catch { }
+    }
     $arts = @()
     for ($i = 1; $i -le 10; $i++) {
         $a = @{ no = $i; title = ""; status = "待写" }
@@ -90,9 +121,21 @@ function Get-ArticleStatuses {
                 $a.status = "已完成"
             }
         }
+        if (-not $a.title -and $i -le $fallback.Count -and $fallback[$i - 1]) {
+            $a.title = $fallback[$i - 1]
+        }
         $arts += $a
     }
     return $arts
+}
+
+function Get-AgentProcesses {
+    # 双轨检测：高权限进程的 CommandLine 可能读不到（为空），此时按进程名精确匹配；
+    # -ceq 区分 CLI 的 opencode.exe 与桌面版的 OpenCode.exe（大小写敏感）
+    Get-CimInstance Win32_Process | Where-Object {
+        ($_.Name -ceq "opencode.exe") -or
+        ($_.CommandLine -match "opencode" -and $_.CommandLine -match "run --agent news-writer" -and $_.CommandLine -notmatch "aidesktop")
+    }
 }
 
 function Update-Progress([string]$status) {
@@ -100,9 +143,7 @@ function Update-Progress([string]$status) {
     $docx = @(Get-ChildItem -LiteralPath $todayDir -Filter "*.docx" -ErrorAction SilentlyContinue)
     $tmpImages = Join-Path $tools "scripts\tmp_images"
     $imgs = @(Get-ChildItem -LiteralPath $tmpImages -Filter "*.jpg" -ErrorAction SilentlyContinue)
-    $running = Get-CimInstance Win32_Process | Where-Object {
-        $_.CommandLine -match "opencode" -and $_.CommandLine -match "run --agent news-writer" -and $_.CommandLine -notmatch "aidesktop"
-    }
+    $running = Get-AgentProcesses
     $elapsed = [math]::Round(((Get-Date) - $startTime).TotalMinutes, 1)
     $eta = $null
     if ($status -eq "running") {
@@ -125,12 +166,11 @@ function Update-Progress([string]$status) {
         images_found = $imgs.Count
         agent_alive  = [bool]$running
         articles     = @(Get-ArticleStatuses)
-        log_tail     = @(Get-Content -LiteralPath $log -Tail 40 -ErrorAction SilentlyContinue | ForEach-Object {
-                            if ($_ -is [string]) { $_ } else { $_.value }
-                        })
+log_tail     = @(Get-Content -LiteralPath $log -Tail 40 -ErrorAction SilentlyContinue | ForEach-Object { [string]$_ })
         last_update  = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
     }
-    $prog | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $progressFile -Encoding UTF8
+    $json = ($prog | ConvertTo-Json -Depth 4) -replace "\r\n", "`n"
+    [System.IO.File]::WriteAllText($progressFile, $json, (New-Object System.Text.UTF8Encoding($false)))
     # 清理 7 天前的进度文件
     Get-ChildItem -LiteralPath $progressDir -Filter "*.json" -ErrorAction SilentlyContinue |
         Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | Remove-Item -Force -ErrorAction SilentlyContinue
@@ -160,8 +200,25 @@ if ($Rerun) {
     exit 0
 }
 
-Open-Dashboard
+if (-not $Attach) { Open-Dashboard }
 
+# attach 接管前先恢复原实例的开始时间（必须在 Update-Progress 之前，否则读到的是自己刚写入的值）
+if ($Attach -and (Test-Path -LiteralPath $progressFile)) {
+    try {
+        $old = Get-Content -LiteralPath $progressFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($old.started_at -match "^\d{2}:\d{2}:\d{2}$") {
+            $script:startTime = [datetime]::ParseExact((Get-Date -Format "yyyy-MM-dd ") + $old.started_at, "yyyy-MM-dd HH:mm:ss", $null)
+            Write-Log "attach mode: resumed startTime from progress ($($old.started_at))"
+        } else {
+            Write-Log "attach mode: progress started_at unrecognized ($($old.started_at)), keeping current"
+        }
+    } catch {
+        Write-Log "attach mode: failed to resume startTime: $_"
+    }
+}
+
+$mode = if ($Rerun) { "rerun" } elseif ($Topup) { "topup" } elseif ($Attach) { "attach" } else { "full" }
+Write-Log "===== run start <$(Get-Date -Format 'HH:mm:ss')> mode=$mode docx_existing=$($existing.Count) ====="
 Write-Log "starting news-writer task (timeout ${TIMEOUT_MIN}min)"
 Update-Progress "running"
 
@@ -177,8 +234,18 @@ $procArgs = @("run", "--agent", "news-writer", "--auto", $prompt)
 # 必须在 tools 目录下运行，opencode 才能找到 tools\.opencode\agent\news-writer.md
 Set-Location $tools
 
-$p = Start-Process -FilePath $opencode -ArgumentList $procArgs -NoNewWindow `
-    -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+# 用 cmd /c 内部重定向（字节流原样写入、不转码），agent 的 UTF-8 中文输出才能原样落盘，
+# 避免 PS 重定向按 GBK 误读导致日志乱码（Merge-Tail 按 UTF-8 读回）
+$cmdLine = '/c ""' + $opencode + '" run --agent news-writer --auto "' + $prompt + '" 1> "' + $stdout + '" 2> "' + $stderr + '""'
+Write-Log "agent cmdline: $cmdLine"
+if ($Attach) {
+    Write-Log "attach mode: reusing existing agent (pid $($(Get-AgentProcesses).ProcessId -join ','))"
+    # attach 不重复输出 agent 已产生的内容（旧实例已合并的归它管）
+    if (Test-Path -LiteralPath $stdout) { $script:outCount = @(Get-Content -LiteralPath $stdout).Count }
+    if (Test-Path -LiteralPath $stderr) { $script:errCount = @(Get-Content -LiteralPath $stderr).Count }
+} else {
+    $p = Start-Process -FilePath "cmd.exe" -ArgumentList $cmdLine -NoNewWindow -PassThru
+}
 
 # 等待循环：opencode.cmd 是 cmd 包装，其句柄可能先于真正的 opencode.exe 退出，
 # 因此不依赖 $p.HasExited，而是检测实际运行的 news-writer opencode 进程是否仍存活。
@@ -187,11 +254,7 @@ $exited = $false
 while ((Get-Date) -lt $deadline) {
     Merge-Tail
     Update-Progress "running"
-    $running = Get-CimInstance Win32_Process | Where-Object {
-        $_.CommandLine -match "opencode" -and
-        $_.CommandLine -match "run --agent news-writer" -and
-        $_.CommandLine -notmatch "aidesktop"
-    }
+    $running = Get-AgentProcesses
     if (-not $running) {
         $exited = $true
         break
@@ -203,11 +266,7 @@ Merge-Tail
 
 if (-not $exited) {
     Write-Log "TIMEOUT after ${TIMEOUT_MIN}min, killing process tree"
-    $victims = Get-CimInstance Win32_Process | Where-Object {
-        $_.CommandLine -match "opencode" -and
-        $_.CommandLine -match "run --agent news-writer" -and
-        $_.CommandLine -notmatch "aidesktop"
-    }
+    $victims = Get-AgentProcesses
     foreach ($v in $victims) {
         try { Stop-Process -Id $v.ProcessId -Force -ErrorAction Stop } catch { Write-Log "Stop-Process failed: $_" }
         taskkill /PID $v.ProcessId /T /F 2>$null | Out-Null
@@ -243,7 +302,7 @@ $dailyMd = Join-Path $dailyState "$ts.md"
 
 # 失败时自动补跑一次（仅首次运行且非补足模式，防止覆盖已有成果）
 function Schedule-AutoRetry {
-    if ($Rerun -or $Topup) { return }
+    if ($Rerun -or $Topup -or $Attach) { return }
     $retryFlag = Join-Path $env:TEMP "news_writer_${ts}.retry"
     if (Test-Path $retryFlag) { return }
     Set-Content -LiteralPath $retryFlag -Value "1" -Encoding UTF8
@@ -282,3 +341,4 @@ Write-Log "done (exit 0)"
 Update-Progress "done"
 & (Join-Path $PSScriptRoot "toast.ps1") -Title "今日新闻写作完成" -Message "已生成 $($final.Count) 篇：$($final.Name -join '、')" -Level success
 exit 0
+

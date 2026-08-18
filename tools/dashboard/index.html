@@ -136,7 +136,7 @@ const statusMap = {
 const phaseMap = {
   start: "启动中", search: "选题搜索", image: "配图下载", write: "写作中",
   build: "生成 docx", verify: "质检", archive: "更新存档", done: "已完成",
-  failed: "失败", timeout: "超时", interrupted: "已中断", rerun: "重跑中", skip: "已跳过"
+  failed: "失败", timeout: "超时", interrupted: "已中断", rerun: "重跑中", topup: "补足中", skip: "已跳过"
 };
 const artStatusMap = { "待写": "gray", "写作中": "amber", "配图中": "blue", "已完成": "green" };
 
@@ -215,7 +215,8 @@ async function getArticles(date) {
 
 function articleHref(date, title) {
   const files = articleCache[date] || [];
-  const hit = files.find(f => title && f.replace(/\.docx$/, "") === title);
+  const norm = s => (s || "").replace(/\.docx$/, "").replace(/[\\\/:*?"<>|]/g, "_");
+  const hit = files.find(f => norm(f) === norm(title));
   if (hit) return "/article/" + date + "/" + encodeURIComponent(hit);
   return "";
 }
@@ -254,7 +255,7 @@ async function render(p) {
     const div = document.createElement("div");
     div.className = "article " + (a.status === "已完成" ? "done" : (a.status !== "待写" ? "work" : ""));
     div.innerHTML = '<div class="no">第 ' + i + ' 篇</div>' +
-      '<div class="title">' + (href ? '<a class="alink" href="' + href + '" target="_blank">' + (a.title || "点击查看") + '</a>' : (a.title || "尚未开始")) + '</div>' +
+      '<div class="title">' + (href ? '<a class="alink" href="' + href + '" target="_blank">' + (a.title || "点击查看") + '</a>' : (a.title || (a.status === "已完成" ? "（标题未记录）" : "尚未开始"))) + '</div>' +
       '<div class="st"><span class="dot ' + (artStatusMap[a.status] || "gray") + '"></span>' + a.status + (href ? ' · <a class="alink" href="' + href + '" target="_blank">打开文章</a>' : '') + '</div>';
     arts.appendChild(div);
   }
@@ -264,7 +265,7 @@ async function render(p) {
   if (typeof ln === "string") t = ln;
   else if (ln && typeof ln.value === "string") t = ln.value;
   else { try { t = JSON.stringify(ln); } catch (e) { t = String(ln); } }
-  return t.replace(/\u001b\[\d*m/g, "");
+  return t.replace(/\u001b\[[0-9;?]*[a-zA-Z]/g, "");
 }
 function logLineClass(line) {
   if (/done \(exit 0\)|PASS|article \d+ done|已生成|已完成|OK docx/.test(line)) return "log-ok";
@@ -299,8 +300,8 @@ function logLineClass(line) {
 
   const stale = document.getElementById("staleWarn");
   const isFinal = ["done", "failed", "timeout", "skip"].includes(p.status);
-  const lastUpd = new Date(p.last_update).getTime();
-  stale.style.display = (!isFinal && Date.now() - lastUpd > 180000) ? "block" : "none";
+  const lastUpd = new Date(String(p.last_update || "").replace(" ", "T")).getTime();
+  stale.style.display = (!isFinal && !isNaN(lastUpd) && Date.now() - lastUpd > 180000) ? "block" : "none";
 }
 
 async function renderTrend() {
