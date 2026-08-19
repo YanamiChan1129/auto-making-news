@@ -55,7 +55,7 @@ description: 每日国际新闻写作流水线。搜索昨日/今日国际新闻
 
 0. **进度上报（必做）**：开始处理第 n 篇前，用 bash 向 `state\progress\steps_<今天日期>.txt` 追加一行 `article <n>: <标题>`（文件不存在则创建，目录不存在则先创建 `state\progress\`）；该篇 docx 生成且自检 PASS 后，再追加一行 `article <n> done`。格式必须严格：`article 3: 某标题` / `article 3 done`。
 1. 读取 `prompts\write_article.md`，按其全部要求撰写：标题（20-30字，主体+数字/时间+动作+结局四要素缺一不可）、副标题栏（——日期 · 国际观察——+一句话概括）、7 段正文（合计 1500-1900 字，第 6 段中外对比必须含具体可核实的中国政策/成就/数据，第 7 段升华体系层面金句收尾）、观察者网风格、金句反差、结尾署名"火星前哨站"。新闻信息不足时允许联网搜索补充核实细节（时间/金额/人名/事件），确无法核实的标"（待核实）"，禁止编造。必须产出 docx，禁止用代码/纯文本/Markdown 替代。
-2. 用 websearch 找 3 张与该新闻直接相关的真实新闻图片直链 URL，遵循 write_article.md 中的配图优先级，并为每张图写一行图注。必须遵守 AI 图禁用铁律：打开图片来源页核实是否为真实新闻照片（标注 Gemini/DALL·E/Midjourney/Stable Diffusion/AI生成等一律弃用），严禁采信站点 og:image，图注须与图片内容严格对应。
+2. 用 websearch 找 3 张与该新闻直接相关的真实新闻图片直链 URL，遵循 write_article.md 中的配图优先级，并为每张图写一行图注。**3 张图必须内容互不相同**（同一照片不同尺寸/同一图重复一律禁止，从事件现场、新闻主角、关键设施等不同角度取图）。必须遵守 AI 图禁用铁律：打开图片来源页核实是否为真实新闻照片（标注 Gemini/DALL·E/Midjourney/Stable Diffusion/AI生成等一律弃用），严禁采信站点 og:image，图注须与图片内容严格对应。
 3. 一次性下载 3 张图（脚本自动追加序号，产出 `n_1.jpg`/`n_2.jpg`/`n_3.jpg`）：
    ```
    python scripts\fetch_image.py --url <URL1> --url <URL2> --url <URL3> --out scripts\tmp_images\n_

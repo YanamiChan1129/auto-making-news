@@ -1,4 +1,7 @@
 import sys
+import hashlib
+import zipfile
+import io
 from docx import Document
 
 EXPECTED_IMAGE_COUNT = 3
@@ -6,6 +9,45 @@ EXPECTED_BODY_PARAS = 7
 MIN_BODY_CHARS = 1500
 MAX_BODY_CHARS = 1900
 BAD_MARKERS = ("captions_placeholder", "placeholder", "Lorem ipsum", "TBD", "待补充")
+DHASH_DUP_THRESHOLD = 4
+
+
+def _dhash(data):
+    from PIL import Image
+    im = Image.open(io.BytesIO(data)).convert("L").resize((9, 8))
+    px = list(im.getdata())
+    bits = []
+    for y in range(8):
+        for x in range(8):
+            bits.append("1" if px[y * 9 + x] > px[y * 9 + x + 1] else "0")
+    return "".join(bits)
+
+
+def _hamming(a, b):
+    return sum(x != y for x, y in zip(a, b))
+
+
+def check_duplicate_images(path):
+    problems = []
+    items = []
+    with zipfile.ZipFile(path) as z:
+        for n in sorted(z.namelist()):
+            if n.startswith("word/media/"):
+                data = z.read(n)
+                items.append((n, hashlib.md5(data).hexdigest(), data))
+    for i in range(len(items)):
+        for j in range(i + 1, len(items)):
+            n1, h1, d1 = items[i]
+            n2, h2, d2 = items[j]
+            if h1 == h2:
+                problems.append(f"duplicate image (identical): {n1} == {n2}")
+                continue
+            try:
+                if _hamming(_dhash(d1), _dhash(d2)) <= DHASH_DUP_THRESHOLD:
+                    problems.append(f"duplicate image (visually same, different size/encoding): {n1} ~ {n2}")
+            except Exception:
+                pass
+    return problems
 
 
 def verify(path):
@@ -54,6 +96,8 @@ def verify(path):
     n_images = len(doc.inline_shapes)
     if n_images != EXPECTED_IMAGE_COUNT:
         problems.append(f"inline images {n_images} != {EXPECTED_IMAGE_COUNT}")
+
+    problems.extend(check_duplicate_images(path))
 
     return problems
 
