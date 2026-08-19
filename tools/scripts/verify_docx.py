@@ -13,6 +13,7 @@ EXPECTED_BODY_PARAS = 7
 MIN_BODY_CHARS = 1500
 MAX_BODY_CHARS = 1900
 BAD_MARKERS = ("captions_placeholder", "placeholder", "Lorem ipsum", "TBD", "待补充")
+FORBIDDEN_TERMS = ("习近平", "习主席", "习总书记", "国家主席")
 DHASH_DUP_THRESHOLD = 4
 
 CROSS_DAY_WINDOW_DAYS = 7
@@ -45,13 +46,16 @@ def _title_entities(title):
     return set(re.findall(r"[《〈【]([^》〉】]{2,20})[》〉】]", title))
 
 
-def _recent_articles(base_dir, window_days):
-    cutoff = (datetime.now() - timedelta(days=window_days)).strftime("%Y-%m-%d")
+def _recent_articles(base_dir, window_days, ref_path):
+    ref_day = os.path.basename(os.path.dirname(os.path.abspath(ref_path)))
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", ref_day):
+        return []
+    cutoff = (datetime.strptime(ref_day, "%Y-%m-%d") - timedelta(days=window_days)).strftime("%Y-%m-%d")
     out = []
     if not os.path.isdir(base_dir):
         return out
     for day in sorted(os.listdir(base_dir)):
-        if not re.match(r"^\d{4}-\d{2}-\d{2}$", day) or day < cutoff:
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", day) or day < cutoff or day > ref_day:
             continue
         for fn in sorted(os.listdir(os.path.join(base_dir, day))):
             if fn.endswith(".docx"):
@@ -79,7 +83,7 @@ def check_cross_day_duplicates(path, window_days=CROSS_DAY_WINDOW_DAYS, base_dir
     title = paras[0] if paras else ""
     body = "".join(p for p in paras[3:17] if p and not p.startswith("图｜") and p != "火星前哨站")
     entities = _title_entities(title)
-    recents = [o for o in _recent_articles(base_dir, window_days) if os.path.abspath(o) != os.path.abspath(path)]
+    recents = [o for o in _recent_articles(base_dir, window_days, path) if os.path.abspath(o) != os.path.abspath(path)]
     pairs = []
     for other in recents:
         try:
@@ -181,6 +185,10 @@ def verify(path, window_days=CROSS_DAY_WINDOW_DAYS):
     for marker in BAD_MARKERS:
         if any(marker in t for t in paras):
             problems.append(f"bad marker '{marker}' found in content")
+
+    for term in FORBIDDEN_TERMS:
+        if any(term in t for t in paras):
+            problems.append(f"forbidden term '{term}' found in content (sensitive person)")
 
     n_images = len(doc.inline_shapes)
     if n_images != EXPECTED_IMAGE_COUNT:
