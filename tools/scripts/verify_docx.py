@@ -1,7 +1,11 @@
 import sys
+import os
+import re
 import hashlib
 import zipfile
 import io
+from datetime import datetime, timedelta
+from difflib import SequenceMatcher
 from docx import Document
 
 EXPECTED_IMAGE_COUNT = 3
@@ -10,6 +14,12 @@ MIN_BODY_CHARS = 1500
 MAX_BODY_CHARS = 1900
 BAD_MARKERS = ("captions_placeholder", "placeholder", "Lorem ipsum", "TBD", "待补充")
 DHASH_DUP_THRESHOLD = 4
+
+CROSS_DAY_WINDOW_DAYS = 7
+TITLE_RATIO_DUP = 0.38
+TITLE_LCS_DUP = 6
+BODY_LCS_DUP = 45
+BODY_RATIO_DUP = 0.30
 
 
 def _dhash(data):
@@ -25,6 +35,85 @@ def _dhash(data):
 
 def _hamming(a, b):
     return sum(x != y for x, y in zip(a, b))
+
+
+def _lcs(a, b):
+    return SequenceMatcher(None, a, b, autojunk=False).find_longest_match(0, len(a), 0, len(b)).size
+
+
+def _title_entities(title):
+    return set(re.findall(r"[《〈【]([^》〉】]{2,20})[》〉】]", title))
+
+
+def _recent_articles(base_dir, window_days):
+    cutoff = (datetime.now() - timedelta(days=window_days)).strftime("%Y-%m-%d")
+    out = []
+    if not os.path.isdir(base_dir):
+        return out
+    for day in sorted(os.listdir(base_dir)):
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", day) or day < cutoff:
+            continue
+        for fn in sorted(os.listdir(os.path.join(base_dir, day))):
+            if fn.endswith(".docx"):
+                out.append(os.path.join(base_dir, day, fn))
+    return out
+
+
+def _common_blocks(a, b, min_size=10):
+    sm = SequenceMatcher(None, a, b, autojunk=False)
+    return [(blk.size, a[blk.a:blk.a + blk.size]) for blk in sm.get_matching_blocks() if blk.size >= min_size]
+
+
+def check_cross_day_duplicates(path, window_days=CROSS_DAY_WINDOW_DAYS, base_dir=None):
+    problems = []
+    if window_days <= 0:
+        return problems
+    if base_dir is None:
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        base_dir = os.path.join(root, "article")
+    try:
+        doc = Document(path)
+        paras = [p.text.strip() for p in doc.paragraphs]
+    except Exception:
+        return problems
+    title = paras[0] if paras else ""
+    body = "".join(p for p in paras[3:17] if p and not p.startswith("图｜") and p != "火星前哨站")
+    entities = _title_entities(title)
+    recents = [o for o in _recent_articles(base_dir, window_days) if os.path.abspath(o) != os.path.abspath(path)]
+    pairs = []
+    for other in recents:
+        try:
+            odoc = Document(other)
+            oparas = [p.text.strip() for p in odoc.paragraphs]
+            otitle = oparas[0] if oparas else ""
+            obody = "".join(p for p in oparas[3:17] if p and not p.startswith("图｜") and p != "火星前哨站")
+        except Exception:
+            continue
+        if not title or not otitle:
+            continue
+        pairs.append((other, otitle, obody))
+    from collections import Counter
+    block_count = Counter()
+    for other, otitle, obody in pairs:
+        for size, txt in _common_blocks(body, obody):
+            block_count[txt] += 1
+    for other, otitle, obody in pairs:
+        tr = SequenceMatcher(None, title, otitle).ratio()
+        tlcs = _lcs(title, otitle)
+        blcs = max((size for size, txt in _common_blocks(body, obody) if block_count[txt] < 3), default=0)
+        br = SequenceMatcher(None, body, obody).ratio()
+        dup = None
+        if entities and entities & _title_entities(otitle):
+            dup = "same subject entity %s" % (entities & _title_entities(otitle))
+        elif tr >= TITLE_RATIO_DUP and tlcs >= TITLE_LCS_DUP:
+            dup = "title ratio %.2f / lcs %d" % (tr, tlcs)
+        elif blcs >= BODY_LCS_DUP:
+            dup = "body common substring %d chars" % blcs
+        elif br >= BODY_RATIO_DUP:
+            dup = "body ratio %.2f" % br
+        if dup:
+            problems.append("cross-day duplicate (within %dd, %s): %s" % (window_days, dup, os.path.basename(other)))
+    return problems
 
 
 def check_duplicate_images(path):
@@ -50,7 +139,7 @@ def check_duplicate_images(path):
     return problems
 
 
-def verify(path):
+def verify(path, window_days=CROSS_DAY_WINDOW_DAYS):
     problems = []
     try:
         doc = Document(path)
@@ -98,22 +187,26 @@ def verify(path):
         problems.append(f"inline images {n_images} != {EXPECTED_IMAGE_COUNT}")
 
     problems.extend(check_duplicate_images(path))
+    problems.extend(check_cross_day_duplicates(path, window_days=window_days))
 
     return problems
 
 
 def main() -> int:
-    if len(sys.argv) < 2:
-        print("usage: verify_docx.py <docx> [<docx> ...]", file=sys.stderr)
-        return 2
+    import argparse
+    p = argparse.ArgumentParser(description="Verify news article docx")
+    p.add_argument("docx", nargs="+", help="docx files to verify")
+    p.add_argument("--recent-days", type=int, default=CROSS_DAY_WINDOW_DAYS,
+                   help="cross-day duplicate window in days (0 to disable)")
+    args = p.parse_args()
     rc = 0
-    for path in sys.argv[1:]:
-        problems = verify(path)
+    for path in args.docx:
+        problems = verify(path, window_days=args.recent_days)
         if problems:
             rc = 1
             print(f"FAIL {path}:")
-            for p in problems:
-                print(f"  - {p}")
+            for prob in problems:
+                print(f"  - {prob}")
         else:
             print(f"PASS {path}")
     return rc
